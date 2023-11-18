@@ -5,6 +5,28 @@
 import logging
 logging.basicConfig(level=logging.INFO)
 
+import os
+import threading
+
+model_loaded = False
+
+def file_cleaner(file):
+    global model_loaded
+    last_pos = 0
+    def cleaner():
+        nonlocal last_pos
+        print("cleaner start")
+        while True:
+            time.sleep(0.1)
+            pos = file.tell()
+            if pos > last_pos:
+                print("cleaner clean %d to %d" % (last_pos,pos))
+                os.posix_fadvise(file.fileno(),last_pos,pos-last_pos,os.POSIX_FADV_DONTNEED)
+            last_pos=pos
+            if model_loaded:
+                break
+    return cleaner
+
 if __name__ == "__main__":
     from argparse import ArgumentParser
     from pytorch_lightning import Trainer
@@ -121,7 +143,8 @@ if __name__ == "__main__":
 
     if pl.__version__[0]=='2':
         parser.add_argument("--accelerator", default="gpu", type=str)
-        parser.add_argument("--strategy", default="auto", type=str)
+        #parser.add_argument("--strategy", default="auto", type=str)
+        parser.add_argument("--strategy", default=None, type=str)
         parser.add_argument("--devices", default=1, type=int)
         parser.add_argument("--num_nodes", default=1, type=int)
         parser.add_argument("--precision", default="fp16", type=str)
@@ -136,7 +159,7 @@ if __name__ == "__main__":
     import numpy as np
     import torch
     from torch.utils.data import DataLoader
-    if "deepspeed" in args.strategy:
+    if args.strategy and "deepspeed" in args.strategy:
         import deepspeed
     from pytorch_lightning import seed_everything
 
@@ -274,7 +297,8 @@ if __name__ == "__main__":
     )
     rank_zero_info(str(vars(args)) + "\n")
 
-    assert args.data_type in ["utf-8", "utf-16le", "numpy", "binidx", "dummy", "wds_img", "uint16"]
+    #assert args.data_type in ["utf-8", "utf-16le", "numpy", "binidx", "dummy", "wds_img", "uint16"]
+    assert args.data_type in ["utf-8", "utf-16le", "numpy", "binidx", "dummy", "wds_img", "uint16", "pickle_traces"]
 
     if args.lr_final == 0 or args.lr_init == 0:
         rank_zero_info("\n\nNote: lr_final = 0 or lr_init = 0. Using linear LR schedule instead.\n\n")
@@ -288,7 +312,7 @@ if __name__ == "__main__":
         rank_zero_info("\n\nNote: you are using fp16 (might overflow). Try bf16 / tf32 for stable training.\n\n")
 
     os.environ["RWKV_JIT_ON"] = "1"
-    if "deepspeed_stage_3" in args.strategy:
+    if args.strategy and "deepspeed_stage_3" in args.strategy:
         os.environ["RWKV_JIT_ON"] = "0"
 
     torch.backends.cudnn.benchmark = True
@@ -315,12 +339,14 @@ if __name__ == "__main__":
     train_data = MyDataset(args)
     args.vocab_size = train_data.vocab_size
 
+    rank_zero_info(f"Initializing model.")
     if args.data_type == 'wds_img':
         from src.model_img import RWKV_IMG
         model = RWKV_IMG(args)
     else:
         from src.model import RWKV
         model = RWKV(args)
+    rank_zero_info(f"Initialized.")
 
     if len(args.load_model) == 0 or args.my_pile_stage == 1:  # shall we build the initial weights?
         init_weight_name = f"{args.proj_dir}/rwkv-init.pth"
@@ -329,7 +355,12 @@ if __name__ == "__main__":
 
     rank_zero_info(f"########## Loading {args.load_model}... ##########")
     try:
-        load_dict = torch.load(args.load_model, map_location="cpu")
+        model_file = open(args.load_model, "rb")
+        cleaner = file_cleaner(model_file)
+        cleaner_thread = threading.Thread(target=cleaner,daemon=True)
+        cleaner_thread.start()
+        load_dict = torch.load(model_file, map_location="cpu")
+        model_loaded = True
         load_keys = list(load_dict.keys())
         for k in load_keys:
             if k.startswith('_forward_module.'):
@@ -353,9 +384,11 @@ if __name__ == "__main__":
             if k not in load_keys:
                 load_dict[k] = model.state_dict()[k]
     model.load_state_dict(load_dict)
+    del load_dict
 
     if pl.__version__[0]=='2':
-        trainer = Trainer(accelerator=args.accelerator,strategy=args.strategy,devices=args.devices,num_nodes=args.num_nodes,precision=args.precision,
+        #trainer = Trainer(accelerator=args.accelerator,strategy=args.strategy,devices=args.devices,num_nodes=args.num_nodes,precision=args.precision,
+        trainer = Trainer(accelerator=args.accelerator,devices=args.devices,num_nodes=args.num_nodes,precision=args.precision,
         logger=args.logger,callbacks=[train_callback(args)],max_epochs=args.max_epochs,check_val_every_n_epoch=args.check_val_every_n_epoch,num_sanity_val_steps=args.num_sanity_val_steps,
         log_every_n_steps=args.log_every_n_steps,enable_checkpointing=args.enable_checkpointing,accumulate_grad_batches=args.accumulate_grad_batches,gradient_clip_val=args.gradient_clip_val)
     else:
@@ -373,7 +406,7 @@ if __name__ == "__main__":
             else:
                 print(f"{str(shape[0]).ljust(5)}       {n}")
 
-    if "deepspeed" in args.strategy:
+    if args.strategy and "deepspeed" in args.strategy:
         trainer.strategy.config["zero_optimization"]["allgather_bucket_size"] = args.ds_bucket_mb * 1000 * 1000
         trainer.strategy.config["zero_optimization"]["reduce_bucket_size"] = args.ds_bucket_mb * 1000 * 1000
 

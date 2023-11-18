@@ -164,7 +164,7 @@ class RWKV_TimeMix_RWKV5_Preview(MyModule):
 
             if 'r3' in os.environ["RWKV_MY_TESTING"]:
                 self.time_mix_g = nn.Parameter(torch.pow(ddd, 0.5 * ratio_1_to_almost0))
-                self.gate = nn.Linear(args.n_embd, args.dim_att, bias=False)
+                self.gate = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
 
             # fancy time_decay
             decay_speed = torch.ones(self.n_head)
@@ -182,10 +182,10 @@ class RWKV_TimeMix_RWKV5_Preview(MyModule):
                 self.time_first = nn.Parameter(torch.ones(self.n_head) * (-3.0))
 
         self.time_shift = nn.ZeroPad2d((0, 0, 1, -1))
-        self.receptance = nn.Linear(args.n_embd, args.dim_att, bias=False)
-        self.key = nn.Linear(args.n_embd, args.dim_att, bias=False)
-        self.value = nn.Linear(args.n_embd, args.dim_att, bias=False)
-        self.output = nn.Linear(args.dim_att, args.n_embd, bias=False)
+        self.receptance = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
+        self.key = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
+        self.value = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
+        self.output = nn.Linear(args.dim_att, args.n_embd, bias=False, dtype=torch.bfloat16)
 
         self.ln_x = nn.GroupNorm(self.n_head, args.dim_att)
 
@@ -394,13 +394,13 @@ class RWKV_TimeMix_RWKV5(MyModule):
             self.time_mix_g = nn.Parameter(torch.pow(ddd, 0.5 * ratio_1_to_almost0))
 
             # fancy time_decay
-            decay_speed = torch.ones(args.dim_att)
+            decay_speed = torch.ones(args.dim_att, dtype=torch.bfloat16)
             for n in range(args.dim_att):
                 decay_speed[n] = -6 + 5 * (n / (args.dim_att - 1)) ** (0.7 + 1.3 * ratio_0_to_1)
             self.time_decay = nn.Parameter(decay_speed.reshape(self.n_head, self.head_size))
             # print(layer_id, self.time_decay.flatten()[:3].cpu().numpy(), '...', self.time_decay.flatten()[-3:].cpu().numpy())
 
-            tmp = torch.zeros(args.dim_att)
+            tmp = torch.zeros(args.dim_att, dtype=torch.bfloat16)
             for n in range(args.dim_att):
                 zigzag = ((n + 1) % 3 - 1) * 0.1
                 tmp[n] = ratio_0_to_1 * (1 - (n / (args.dim_att - 1))) + zigzag
@@ -408,12 +408,12 @@ class RWKV_TimeMix_RWKV5(MyModule):
             self.time_faaaa = nn.Parameter(tmp.reshape(self.n_head, self.head_size))
 
         self.time_shift = nn.ZeroPad2d((0, 0, 1, -1))
-        self.receptance = nn.Linear(args.n_embd, args.dim_att, bias=False)
-        self.key = nn.Linear(args.n_embd, args.dim_att, bias=False)
+        self.receptance = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
+        self.key = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
 
-        self.value = nn.Linear(args.n_embd, args.dim_att, bias=False)
-        self.output = nn.Linear(args.dim_att, args.n_embd, bias=False)
-        self.gate = nn.Linear(args.n_embd, args.dim_att, bias=False)
+        self.value = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
+        self.output = nn.Linear(args.dim_att, args.n_embd, bias=False, dtype=torch.bfloat16)
+        self.gate = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
         self.ln_x = nn.GroupNorm(self.n_head, args.dim_att)
 
     @MyFunction
@@ -489,18 +489,18 @@ class RWKV_TimeMix(MyModule):
             self.time_mix_r = nn.Parameter(torch.pow(ddd, 0.5 * ratio_1_to_almost0))
 
         self.time_shift = nn.ZeroPad2d((0, 0, 1, -1))
-        self.key = nn.Linear(args.n_embd, args.dim_att, bias=False)
-        self.value = nn.Linear(args.n_embd, args.dim_att, bias=False)
-        self.receptance = nn.Linear(args.n_embd, args.dim_att, bias=False)
-        self.output = nn.Linear(args.dim_att, args.n_embd, bias=False)
+        self.key = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
+        self.value = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
+        self.receptance = nn.Linear(args.n_embd, args.dim_att, bias=False, dtype=torch.bfloat16)
+        self.output = nn.Linear(args.dim_att, args.n_embd, bias=False, dtype=torch.bfloat16)
 
         if 'a' in os.environ["RWKV_MY_TESTING"]:
             self.register_buffer("att_mask", torch.tril(torch.ones(args.ctx_len, args.ctx_len)))
             d_qkv = args.n_embd // 16
-            self.qq = nn.Linear(args.n_embd, d_qkv, bias=False)
-            self.kk = nn.Linear(args.n_embd, d_qkv, bias=False)
-            self.vv = nn.Linear(args.n_embd, d_qkv, bias=False)
-            self.oo = nn.Linear(d_qkv, args.n_embd, bias=False)
+            self.qq = nn.Linear(args.n_embd, d_qkv, bias=False, dtype=torch.bfloat16)
+            self.kk = nn.Linear(args.n_embd, d_qkv, bias=False, dtype=torch.bfloat16)
+            self.vv = nn.Linear(args.n_embd, d_qkv, bias=False, dtype=torch.bfloat16)
+            self.oo = nn.Linear(d_qkv, args.n_embd, bias=False, dtype=torch.bfloat16)
             with torch.no_grad():
                 self.time_mix_qq = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
                 self.time_mix_kk = nn.Parameter(torch.pow(ddd, ratio_1_to_almost0))
@@ -606,9 +606,9 @@ class MishGLU(MyModule):
 
             self.time_mix_k = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
-            self.aa = nn.Linear(args.n_embd, args.dim_ffn, bias=False)
-            self.bb = nn.Linear(args.n_embd, args.dim_ffn, bias=False)
-            self.value = nn.Linear(args.dim_ffn, args.n_embd, bias=False)
+            self.aa = nn.Linear(args.n_embd, args.dim_ffn, bias=False, dtype=torch.bfloat16)
+            self.bb = nn.Linear(args.n_embd, args.dim_ffn, bias=False, dtype=torch.bfloat16)
+            self.value = nn.Linear(args.dim_ffn, args.n_embd, bias=False, dtype=torch.bfloat16)
 
     @MyFunction
     def forward(self, x):
@@ -627,17 +627,18 @@ class MishGLU(MyModule):
 class Block(nn.Module):
     def __init__(self, args, layer_id):
         super().__init__()
+        print(f'Creating block #{layer_id}')
         self.args = args
         self.layer_id = layer_id
 
-        self.ln1 = nn.LayerNorm(args.n_embd)
-        self.ln2 = nn.LayerNorm(args.n_embd)
+        self.ln1 = nn.LayerNorm(args.n_embd, dtype=torch.bfloat16)
+        self.ln2 = nn.LayerNorm(args.n_embd, dtype=torch.bfloat16)
 
         if self.layer_id == 0:
-            self.ln0 = nn.LayerNorm(args.n_embd)
+            self.ln0 = nn.LayerNorm(args.n_embd, dtype=torch.bfloat16)
             if args.my_pos_emb > 0:
-                self.pos_emb_x = nn.Parameter(torch.zeros((1,args.my_pos_emb,args.n_embd)))
-                self.pos_emb_y = nn.Parameter(torch.zeros((args.my_pos_emb,1,args.n_embd)))
+                self.pos_emb_x = nn.Parameter(torch.zeros((1,args.my_pos_emb,args.n_embd), dtype=torch.bfloat16))
+                self.pos_emb_y = nn.Parameter(torch.zeros((args.my_pos_emb,1,args.n_embd), dtype=torch.bfloat16))
 
         if self.layer_id == 0 and self.args.pre_ffn > 0:
             self.ffnPre = RWKV_ChannelMix(args, 0)
@@ -655,10 +656,10 @@ class Block(nn.Module):
             self.ffn = RWKV_ChannelMix(args, layer_id)
         
         if args.tiny_att_dim > 0 and self.layer_id == args.tiny_att_layer:
-            self.tiny_ln = nn.LayerNorm(args.n_embd)
-            self.tiny_q = nn.Linear(args.n_embd, args.tiny_att_dim, bias=False)
-            self.tiny_k = nn.Linear(args.n_embd, args.tiny_att_dim, bias=False)
-            self.tiny_v = nn.Linear(args.n_embd, args.n_embd, bias=False)
+            self.tiny_ln = nn.LayerNorm(args.n_embd, dtype=torch.bfloat16)
+            self.tiny_q = nn.Linear(args.n_embd, args.tiny_att_dim, bias=False, dtype=torch.bfloat16)
+            self.tiny_k = nn.Linear(args.n_embd, args.tiny_att_dim, bias=False, dtype=torch.bfloat16)
+            self.tiny_v = nn.Linear(args.n_embd, args.n_embd, bias=False, dtype=torch.bfloat16)
             self.register_buffer("tiny_mask", torch.tril(torch.ones(args.ctx_len, args.ctx_len)))
 
         if args.dropout > 0:
@@ -730,16 +731,16 @@ class RWKV(pl.LightningModule):
         assert args.dim_att % 32 == 0
         assert args.dim_ffn % 32 == 0
 
-        self.emb = nn.Embedding(args.vocab_size, args.n_embd)
+        self.emb = nn.Embedding(args.vocab_size, args.n_embd, dtype=torch.bfloat16)
 
         self.blocks = nn.ModuleList([Block(args, i) for i in range(args.n_layer)])
 
-        self.ln_out = nn.LayerNorm(args.n_embd)
-        self.head = nn.Linear(args.n_embd, args.vocab_size, bias=False)
+        self.ln_out = nn.LayerNorm(args.n_embd, dtype=torch.bfloat16)
+        self.head = nn.Linear(args.n_embd, args.vocab_size, bias=False, dtype=torch.bfloat16)
 
         if args.head_qk > 0:
-            self.head_q = nn.Linear(args.n_embd, args.head_qk, bias=False)
-            self.head_k = nn.Linear(args.n_embd, args.head_qk, bias=False)
+            self.head_q = nn.Linear(args.n_embd, args.head_qk, bias=False, dtype=torch.bfloat16)
+            self.head_k = nn.Linear(args.n_embd, args.head_qk, bias=False, dtype=torch.bfloat16)
             self.register_buffer("copy_mask", torch.tril(torch.ones(args.ctx_len, args.ctx_len)))
         if args.dropout > 0:
             self.drop0 = nn.Dropout(p = args.dropout)

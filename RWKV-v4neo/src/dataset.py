@@ -5,6 +5,7 @@
 import json, math, random, os, sys
 import numpy as np
 import torch
+import pickle
 from torch.utils.data import Dataset
 from pytorch_lightning.utilities import rank_zero_info
 from .binidx import MMapIndexedDataset
@@ -71,6 +72,12 @@ class MyDataset(Dataset):
             self.data_size = -1
             self.data = None
             self.error_count = 0
+        elif args.data_type == "pickle_traces":
+            with open(args.data_file, "rb") as f:
+                self.data = pickle.load(f)
+            self.vocab_size = args.vocab_size
+            self.data_size = len(self.data)
+            rank_zero_info(f"Data has {self.data_size} talks.")
         else:
             if args.data_type == "dummy":
                 rank_zero_info("Building dummy data...")
@@ -154,6 +161,18 @@ class MyDataset(Dataset):
             if args.data_type == "uint16":
                 i = np.random.randint(0, self.data_size-1)
                 dix = self.data[i]
+                x = torch.tensor(dix[:-1], dtype=torch.long)
+                y = torch.tensor(dix[1:], dtype=torch.long)
+            elif args.data_type == "pickle_traces":
+                req_len = args.ctx_len + 1
+                i = np.random.randint(0, self.data_size)
+                traces = self.data[i]
+                j = np.random.randint(0, len(traces))
+                dix = traces[j]
+                if dix.shape[0] > req_len:
+                    # cheat: random slice
+                    idx = np.random.randint(0, dix.shape[0] - req_len + 1)
+                    dix = dix[idx:idx + req_len]
                 x = torch.tensor(dix[:-1], dtype=torch.long)
                 y = torch.tensor(dix[1:], dtype=torch.long)
             else:
